@@ -1,0 +1,275 @@
+package com.example.smart_health_systems_sw.presentation
+
+import android.R
+import android.annotation.SuppressLint
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.AsyncTask
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.wear.compose.material.TimeText
+import com.example.smart_health_systems_sw.presentation.theme.SmarthealthsystemsswTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import android.provider.Settings
+import java.util.List
+
+@SuppressLint("HardwareIds")
+fun getAndroidId(context: Context): String {
+    return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+}
+
+private suspend fun sendDataToServer(userId: String, rate: Int, sType: String, context: Context) {
+    val urlString = "https://aiigh.space/api/event/create/"
+
+    withContext(Dispatchers.IO) {
+        val connection = URL(urlString).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("Accept", "application/json")
+        connection.doOutput = true
+
+        val jsonInputString = """
+            {
+                "device_id": "${getAndroidId(context)}",
+                "type": "$sType",
+                "data": $rate
+            }
+        """.trimIndent()
+
+        try {
+            val outputStream: OutputStream = connection.outputStream
+            val input = jsonInputString.toByteArray(charset("utf-8"))
+            outputStream.write(input, 0, input.size)
+
+        } catch (e: Exception) {
+            Log.d("smart-health-systems", e.stackTraceToString())
+            val response = "Error: ${e.message}"
+        }
+        try {
+            val response = connection.inputStream.bufferedReader().use {
+                it.readText()
+            }
+            withContext(Dispatchers.Main) {
+                Log.d("smart-health-systems", "$sType Response: $response")
+            }
+        }
+        catch (e: Exception) {
+            Log.d("smart-health-systems", e.stackTraceToString())
+            val response = "Error: ${e.message}"
+        }
+
+
+
+
+    }
+}
+
+
+class SensorListener(private val context: Context, sType: String) : SensorEventListener {
+    var sType = sType
+    var rate: Int by mutableStateOf(0) // Используем MutableState для хранения данных сенсора
+    var user_id: Int = 0
+
+    init {
+        user_id = loadTextFromPreferences(context).toString().toInt()
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        val accValue = event?.values?.get(0)
+        val UserId = loadTextFromPreferences(context)
+        rate = accValue?.toInt() ?: 0 // Обновляем состояние при изменении данных сенсора
+        Log.d("smart-health-systems", "UserID: $UserId, value: $rate")
+        CoroutineScope(Dispatchers.IO).launch {
+            sendDataToServer(UserId.toString(), rate, sType, context)
+        }
+
+    }
+
+
+
+
+    override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
+        Log.d("smart-health-systems", p0.toString())
+    }
+
+    private fun loadTextFromPreferences(context: Context): String {
+        val sharedPreferences = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+        return sharedPreferences.getString("user_input", "") ?: ""
+    }
+
+}
+
+class MainActivity : ComponentActivity() {
+    private var mSensorManager: SensorManager? = null
+    private var mHeartSensor: Sensor? = null
+    private var mPressureSensor: Sensor? = null
+    private var mAmbientTemperatureSensor: Sensor? = null
+    
+
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+
+        mSensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        mHeartSensor = mSensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        mPressureSensor = mSensorManager?.getDefaultSensor(Sensor.TYPE_PRESSURE)
+        mAmbientTemperatureSensor = mSensorManager?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
+
+        val sensorsList: MutableList<Sensor>? = mSensorManager?.getSensorList(Sensor.TYPE_ALL)
+        Log.d(
+            "smart-health-systems-sensors",
+            sensorsList.toString()
+        )
+
+
+        if (mHeartSensor == null) {
+            // No heart rate sensor
+            Log.d(
+                "smart-health-systems",
+                "No heart rate sensor"
+            )
+        } else {
+            Log.d(
+                "smart-health-systems",
+                "Found heart rate sensor"
+            )
+        }
+
+        if (mPressureSensor == null) {
+            // No pressure sensor
+            Log.d(
+                "smart-health-systems",
+                "No pressure sensor"
+            )
+        } else {
+            Log.d(
+                "smart-health-systems",
+                "Found pressure sensor"
+            )
+        }
+
+        if (mAmbientTemperatureSensor == null) {
+            // No ambient temperature sensor
+            Log.d(
+                "smart-health-systems",
+                "No ambient temperature sensor"
+            )
+        } else {
+            Log.d(
+                "smart-health-systems",
+                "Found ambient temperature sensor"
+            )
+        }
+
+        val listenerHeart = SensorListener(this, "heart-rate")
+        mSensorManager?.registerListener(listenerHeart, mHeartSensor, SensorManager.SENSOR_DELAY_)
+
+        val listenerPressure = SensorListener(this, "pressure")
+        mSensorManager?.registerListener(listenerPressure, mPressureSensor, SensorManager.SENSOR_DELAY_NORMAL)
+
+        val listenerAmbientTemperature = SensorListener(this, "ambient-temperature")
+        mSensorManager?.registerListener(listenerAmbientTemperature, mAmbientTemperatureSensor, SensorManager.SENSOR_DELAY_NORMAL)
+
+
+        super.onCreate(savedInstanceState)
+
+        setTheme(R.style.Theme_DeviceDefault)
+
+        setContent {
+            SmarthealthsystemsswTheme {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colors.background),
+                    contentAlignment = Alignment.Center
+                )
+                {
+                    Column {
+                        HeartRateText(listenerHeart.rate)
+                        Text(text = "Pressure: ${listenerPressure.rate}")
+                        Text(text = "AID: ${getAndroidId(context = this@MainActivity)}")
+//                        UserInputField()
+                    }
+                }
+
+            }
+        }
+    }
+}
+
+@Composable
+fun HeartRateText(rate: Int) {
+    Text(
+        text = "BPM: $rate",
+//        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+fun UserInputField() {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf(loadTextFromPreferences(context)) }
+
+    Text(text = "USERID: $text")
+    BasicTextField(
+        value = text,
+        onValueChange = { newText ->
+            text = newText
+            saveTextToPreferences(context, newText)
+        },
+        modifier = Modifier
+            .padding(16.dp)
+            .background(color = MaterialTheme.colors.onPrimary),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done
+        ),
+        singleLine = true
+
+    )
+}
+
+private fun saveTextToPreferences(context: Context, text: String) {
+    val sharedPreferences = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+    val editor = sharedPreferences.edit()
+    editor.putString("user_input", text)
+    editor.apply()
+}
+
+private fun loadTextFromPreferences(context: Context): String {
+    val sharedPreferences = context.getSharedPreferences("MyPrefs", Context.MODE_PRIVATE)
+    return sharedPreferences.getString("user_input", "") ?: ""
+}
